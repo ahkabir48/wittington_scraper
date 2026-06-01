@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Enriched companies — Viewer</title>
+<style>
+  :root{--bg:#f7fafc;--card:#ffffff;--muted:#6b7280;--accent:#0f172a;--green:#16a34a;--yellow:#f59e0b;--red:#ef4444}
+  body{font-family:Inter,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--accent);margin:0;padding:20px}
+  .wrap{max-width:1200px;margin:0 auto}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .left{display:flex;gap:8px;align-items:center}
+  h1{font-size:18px;margin:0}
+  .controls{display:flex;gap:8px;align-items:center}
+  input[type="search"]{padding:8px 10px;border-radius:8px;border:1px solid #e6e9ee;min-width:260px}
+  select,button{padding:8px 10px;border-radius:8px;border:1px solid #e6e9ee;background:#fff;cursor:pointer}
+  .badges{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+  .badge{background:#eef2ff;padding:6px 8px;border-radius:999px}
+  .table-wrap{background:var(--card);border-radius:8px;padding:8px;box-shadow:0 6px 18px rgba(2,6,23,0.06)}
+  table{width:100%;border-collapse:collapse}
+  thead th{position:sticky;top:0;background:#f8fafc;padding:10px;text-align:left;font-weight:700;font-size:13px;border-bottom:1px solid #eee}
+  tbody tr{border-bottom:1px solid #f1f5f9;cursor:pointer}
+  td{padding:10px;vertical-align:top;font-size:14px}
+  td.name{font-weight:600;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* rationale should wrap inside its cell */
+  td.rationale{color:var(--muted);font-size:13px;max-width:720px;white-space:normal;word-break:break-word;overflow-wrap:break-word}
+  .score-pill{padding:6px 8px;border-radius:999px;font-weight:600;font-size:13px;display:inline-block}
+  .s-strong{background:rgba(16,185,129,0.08);color:var(--green)}
+  .s-potential{background:rgba(245,158,11,0.08);color:var(--yellow)}
+  .s-pass{color:var(--muted)}
+  .meta{font-size:12px;color:var(--muted)}
+  /* modal */
+  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.35);z-index:999}
+  .modal-card{background:var(--card);padding:18px;border-radius:10px;max-width:920px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(2,6,23,0.25)}
+  .modal pre{white-space:pre-wrap;font-size:13px;color:var(--muted)}
+  .close-btn{float:right;border:none;background:transparent;font-size:20px;cursor:pointer}
+  a { color: inherit; text-decoration:underline; }
+  @media (max-width:900px){ td.rationale{display:none} thead th:nth-child(2){display:none} input[type="search"]{min-width:140px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="left">
+      <h1>Enriched companies</h1>
+      <div class="badges" style="margin-left:12px">
+        <div class="badge" id="total">Total: 0</div>
+        <div class="badge" id="strong">Strong: 0</div>
+        <div class="badge" id="potential">Potential: 0</div>
+        <div class="badge" id="pass">Pass: 0</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input id="q" type="search" placeholder="Filter by name, score, rationale..." />
+      <select id="sort">
+        <option value="score_desc">Rank: Score (best)</option>
+        <option value="name_asc">Name (A→Z)</option>
+      </select>
+      <button id="btnDownload">Download CSV</button>
+      <button id="btnLoad">Load CSV</button>
+      <input id="fileInput" type="file" accept=".csv" style="display:none" />
+    </div>
+  </header>
+
+  <div class="table-wrap" id="tableWrap">
+    <table id="tbl" aria-label="Enriched companies table">
+      <thead>
+        <tr><th>Name</th><th>Score</th><th>Rationale</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="meta" style="margin-top:8px">Tip: host this folder with the CSV (python -m http.server) or click "Load CSV" to open a local file.</p>
+</div>
+
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button id="close" class="close-btn" title="Close">✕</button>
+    <h3 id="title"></h3>
+    <div id="body"><pre id="pre"></pre></div>
+  </div>
+</div>
+
+<script>
+/* small CSV parser (handles quoted fields) */
+function parseCSV(text){
+  const rows = []; let cur = []; let i=0, field='', inQ=false;
+  while(i < text.length){
+    const ch = text[i];
+    if(inQ){
+      if(ch === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      } else { field += ch; i++; continue; }
+    } else {
+      if(ch === '"'){ inQ = true; i++; continue; }
+      if(ch === ','){ cur.push(field); field=''; i++; continue; }
+      if(ch === '\r'){ i++; continue; }
+      if(ch === '\n'){ cur.push(field); rows.push(cur); cur = []; field=''; i++; continue; }
+      field += ch; i++; continue;
+    }
+  }
+  if(inQ === false){ if(field !== '' || cur.length) { cur.push(field); rows.push(cur); } }
+  return rows;
+}
+
+function normalizeScore(s){
+  if(!s) return 'Potential prospect';
+  s = s.trim();
+  if(['Strong prospect','Potential prospect','Pass'].includes(s)) return s;
+  return s;
+}
+
+function scoreRank(s){
+  if(s === 'Strong prospect') return 1;
+  if(s === 'Potential prospect') return 2;
+  return 3;
+}
+
+function renderTable(data){
+  const tbody = document.querySelector('#tbl tbody');
+  tbody.innerHTML = '';
+  data.forEach(row=>{
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-score', row.score);
+
+    const topUrl = (row.enrichment && row.enrichment.tavily && row.enrichment.tavily.top_url) ? row.enrichment.tavily.top_url : '';
+    const nameHtml = topUrl
+      ? `<a href="${escapeHtml(topUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.name)}</a>`
+      : escapeHtml(row.name);
+
+    tr.innerHTML = `
+      <td class="name">${nameHtml}</td>
+      <td><span class="score-pill ${row.score === 'Strong prospect' ? 's-strong' : row.score === 'Potential prospect' ? 's-potential' : 's-pass'}">${escapeHtml(row.score)}</span></td>
+      <td class="rationale">${escapeHtml(row.screening_notes || '')}</td>
+    `;
+    tr.addEventListener('click', () => {
+      document.getElementById('title').textContent = row.name + ' — ' + row.score;
+      let bodyText = (row.screening_notes_full || '') + "\n\n" + JSON.stringify(row.enrichment || {}, null, 2);
+      if(topUrl) bodyText = "Top URL: " + topUrl + "\n\n" + bodyText;
+      document.getElementById('pre').textContent = bodyText;
+      document.getElementById('modal').style.display = 'flex';
+    });
+    tbody.appendChild(tr);
+  });
+  updateCounts(data);
+}
+
+function escapeHtml(s){ return String(s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+
+function updateCounts(data){
+  const total = data.length;
+  const strong = data.filter(d=>d.score==='Strong prospect').length;
+  const potential = data.filter(d=>d.score==='Potential prospect').length;
+  const pass = data.filter(d=>d.score==='Pass').length;
+  document.getElementById('total').textContent = 'Total: ' + total;
+  document.getElementById('strong').textContent = 'Strong: ' + strong;
+  document.getElementById('potential').textContent = 'Potential: ' + potential;
+  document.getElementById('pass').textContent = 'Pass: ' + pass;
+}
+
+/* load CSV from server path or file input */
+async function loadCsvPath(path){
+  try{
+    const res = await fetch(path);
+    if(!res.ok) throw new Error('Fetch failed');
+    const txt = await res.text();
+    return txt;
+  }catch(e){
+    return null;
+  }
+}
+
+/* extract single-line Reason from screening_notes text */
+function extractReason(fullNotes){
+  if(!fullNotes) return '';
+  const m = fullNotes.match(/- Reason:\s*([^\n\r]+)/i);
+  if(m) return m[1].trim().replace(/\s+/g,' ');
+  // fallback: return first non-empty line
+  const lines = fullNotes.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  return lines.length ? lines[0].slice(0,200) : '';
+}
+
+function csvToObjects(text){
+  const rows = parseCSV(text);
+  if(!rows.length) return [];
+  const headers = rows.shift().map(h=>h.trim());
+  return rows.map(r=>{
+    const obj = {};
+    for(let i=0;i<headers.length;i++) obj[headers[i]] = (r[i]||'').trim();
+    const fullNotes = obj.screening_notes || obj['screening_notes'] || '';
+    const reason = extractReason(fullNotes);
+    return {
+      name: obj.name || obj.company || obj.Company || '',
+      score: normalizeScore(obj.score || ''),
+      screening_notes: reason,
+      screening_notes_full: fullNotes,
+      enrichment: (()=>{ try{ return JSON.parse(obj.enrichment_json||'{}'); }catch(e){ return {}; } })(),
+      last_updated: obj.last_updated || ''
+    };
+  });
+}
+
+/* sorting + filtering */
+function applySortFilter(original){
+  const q = (document.getElementById('q').value||'').trim().toLowerCase();
+  let data = original.filter(d=>{
+    if(!q) return true;
+    return (d.name + ' ' + d.score + ' ' + (d.screening_notes||'')).toLowerCase().indexOf(q) !== -1;
+  });
+  const sort = document.getElementById('sort').value;
+  if(sort === 'score_desc'){
+    data.sort((a,b)=> scoreRank(a.score) - scoreRank(b.score) || a.name.localeCompare(b.name));
+  } else if(sort === 'name_asc'){
+    data.sort((a,b)=> a.name.localeCompare(b.name));
+  }
+  return data;
+}
+
+(async function init(){
+  let orig = [];
+  const defaultPath = 'enriched_companies.csv';
+  let text = await loadCsvPath(defaultPath);
+  if(!text){
+    // show message to user — they'll need to click Load CSV to open a local file
+    console.info('Could not fetch ' + defaultPath + ' — use "Load CSV" to open a local file.');
+  } else {
+    orig = csvToObjects(text);
+    renderTable(applySortFilter(orig));
+  }
+
+  // wire UI
+  document.getElementById('q').addEventListener('input', ()=> renderTable(applySortFilter(orig)));
+  document.getElementById('sort').addEventListener('change', ()=> renderTable(applySortFilter(orig)));
+  document.getElementById('btnDownload').addEventListener('click', ()=> { window.location.href = defaultPath; });
+
+  // load local file fallback
+  const fileInput = document.getElementById('fileInput');
+  document.getElementById('btnLoad').addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', async (ev)=>{
+    const f = ev.target.files[0];
+    if(!f) return;
+    const txt = await f.text();
+    orig = csvToObjects(txt);
+    renderTable(applySortFilter(orig));
+  });
+
+  // modal
+  document.getElementById('close').addEventListener('click', ()=> document.getElementById('modal').style.display = 'none');
+  window.addEventListener('keydown', e=> { if(e.key === 'Escape') document.getElementById('modal').style.display = 'none'; });
+
+})();
+</script>
+</body>
+</html>
