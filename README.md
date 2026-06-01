@@ -21,6 +21,6 @@ What the web viewr (index.html, access at **https://ahkabir48.github.io/wittingt
 ## Cost Breakdown
 - Build: $0 --> Github Copilot support in VSCode, utilizing free models available with Student Pack
 - Web Search (Tavily): $0 --> 1,000 credits (search)/month with free tier, cycled through 3 accounts to avoid incurring costs here. Assuming I went with *pay as you go* on one account, the cost would've been $0.008 per search past 1,000 searches each month. For this single task that would've resulted in ~$16 (not considering pre-passes due to keywords like "ventures").
-- LLM (Fireworks API - OpenAI gpt-oss-20b): $0.65 --> low context model which is more than serviceable for this purpose. Pricing is $0.07/M uncached input tokens, $0.04/M cached input tokens, $0.30/M output tokens. **5.65M tokens** used for this task (both testing and prod), incurring **$0.66** in LLM costs.
+- LLM (Fireworks API - OpenAI gpt-oss-20b): $0.65 --> low context model which is more than serviceable for this purpose. Pricing is $0.07/M uncached input tokens, $0.04/M cached input tokens, $0.30/M output tokens. **5.65M tokens** used for this task (both testing and prod), incurring **$0.66** in LLM costs. 
 
 
