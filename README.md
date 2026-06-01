@@ -1,5 +1,7 @@
 # Wittington Scraper — README
 
+**To try the web viewer, visit https://ahkabir48.github.io/wittington_scraper/** (deployment on the right toolbar in this repo).
+
 Optimized for costs and given limited context. 
 
 Total task involved scraping and screening **3288** companies from https://manife.st/who-attends.
